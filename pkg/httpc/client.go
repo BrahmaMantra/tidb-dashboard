@@ -26,9 +26,30 @@ type Client struct {
 	http.Client
 
 	header http.Header
+	Config *config.Config // Store config reference for certificate monitoring
 }
 
 func NewHTTPClient(lc fx.Lifecycle, config *config.Config) *Client {
+	// Print TLS configuration information
+	if config.ClusterTLSConfig != nil {
+		log.Info("HTTP Client TLS Configuration",
+			zap.Int("cert_count", len(config.ClusterTLSConfig.Certificates)),
+			zap.Bool("has_root_cas", config.ClusterTLSConfig.RootCAs != nil),
+			zap.Bool("insecure_skip_verify", config.ClusterTLSConfig.InsecureSkipVerify),
+			zap.Uint16("min_version", config.ClusterTLSConfig.MinVersion),
+			zap.Uint16("max_version", config.ClusterTLSConfig.MaxVersion),
+		)
+		if config.ClusterTLSInfo != nil {
+			log.Info("TLS Info Configuration",
+				zap.String("cert_file", config.ClusterTLSInfo.CertFile),
+				zap.String("key_file", config.ClusterTLSInfo.KeyFile),
+				zap.String("ca_file", config.ClusterTLSInfo.TrustedCAFile),
+			)
+		}
+	} else {
+		log.Info("HTTP Client created without TLS configuration")
+	}
+
 	cli := http.Client{
 		Transport: &http.Transport{
 			DialTLS: func(network, addr string) (net.Conn, error) {
@@ -49,6 +70,7 @@ func NewHTTPClient(lc fx.Lifecycle, config *config.Config) *Client {
 
 	return &Client{
 		Client: cli,
+		Config: config,
 	}
 }
 
@@ -58,6 +80,7 @@ func (c *Client) Clone() *Client {
 	return &Client{
 		Client: c.Client,
 		header: c.header.Clone(),
+		Config: c.Config,
 	}
 }
 
@@ -99,6 +122,11 @@ func (c *Client) Send(
 	errType *errorx.Type,
 	errOriginComponent string,
 ) (*Response, error) {
+	// Monitor certificate changes before each request
+	if c.Config != nil {
+		c.Config.MonitorCertificateChanges()
+	}
+
 	req, err := http.NewRequestWithContext(ctx, method, uri, body)
 	if err != nil {
 		e := errType.Wrap(err, "Failed to build %s API request", errOriginComponent)

@@ -154,17 +154,37 @@ func getContext() context.Context {
 }
 
 func buildTLSConfig(tlsInfo *transport.TLSInfo, allowedNames *string) *tls.Config {
-	tlsConfig, err := tlsInfo.ClientConfig()
+	// Manually load certificate and CA
+	cert, err := tls.LoadX509KeyPair(tlsInfo.CertFile, tlsInfo.KeyFile)
 	if err != nil {
-		log.Fatal("Failed to load certificates", zap.Error(err))
+		log.Fatal("Failed to load client cert/key", zap.Error(err))
+	}
+	caCert, err := os.ReadFile(tlsInfo.TrustedCAFile)
+	if err != nil {
+		log.Fatal("Failed to read CA cert", zap.Error(err))
+	}
+	caPool := x509.NewCertPool()
+	if !caPool.AppendCertsFromPEM(caCert) {
+		log.Fatal("Failed to append CA cert")
 	}
 
-	// Disable the default server verification routine in favor of a manually defined connection
-	// verification callback. The custom verification process verifies that the server
-	// certificate is issued by a trusted root CA, and that the peer certificate identities
-	// matches at least one entry specified in verifyNames (if specified). This is required
-	// because tidb-dashboard directs requests to a loopback-bound forwarding proxy, which would
-	// otherwise cause server hostname verification to fail.
+	tlsConfig := &tls.Config{
+		Certificates: []tls.Certificate{cert},
+		RootCAs:      caPool,
+	}
+
+	// Print certificate information for debugging
+	log.Info("TLS Configuration loaded",
+		zap.String("cert_file", tlsInfo.CertFile),
+		zap.String("key_file", tlsInfo.KeyFile),
+		zap.String("ca_file", tlsInfo.TrustedCAFile),
+		zap.String("allowed_names", *allowedNames),
+		zap.Int("cert_count", len(tlsConfig.Certificates)),
+		zap.Bool("has_root_cas", tlsConfig.RootCAs != nil),
+		zap.Bool("insecure_skip_verify", tlsConfig.InsecureSkipVerify),
+	)
+
+	// Keep the original custom verification logic
 	tlsConfig.InsecureSkipVerify = true
 	tlsConfig.VerifyConnection = func(state tls.ConnectionState) error {
 		opts := x509.VerifyOptions{
@@ -178,8 +198,6 @@ func buildTLSConfig(tlsInfo *transport.TLSInfo, allowedNames *string) *tls.Confi
 
 		_, err := state.PeerCertificates[0].Verify(opts)
 
-		// Optionally verify the peer SANs when available. If no peer identities are
-		// provided, simply reuse the verification result of the CA verification.
 		if err != nil || *allowedNames == "" {
 			return err
 		}
@@ -245,6 +263,9 @@ func main() {
 	if cliConfig.EnableDebugLog {
 		log.SetLevel(zapcore.DebugLevel)
 	}
+
+	// Start certificate monitoring
+	cliConfig.CoreConfig.StartCertificateMonitoring(ctx)
 
 	loadDistroStringsRes()
 

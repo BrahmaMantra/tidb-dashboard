@@ -56,10 +56,36 @@ func normalizeCustomizedPromAddress(addr string) (string, error) {
 func (s *Service) resolveCustomizedPromAddress(acceptInvalidAddr bool) (string, error) {
 	url := s.params.Config.PDEndPoint + "/pd/api/v1/config"
 	log.Info("url is ", zap.Any("url", url))
+
+	// Monitor certificate changes before making request
+	s.params.Config.MonitorCertificateChanges()
+
+	// Print TLS configuration before making request
+	if s.params.Config.ClusterTLSConfig != nil {
+		log.Info("TLS Configuration before PD request",
+			zap.Int("cert_count", len(s.params.Config.ClusterTLSConfig.Certificates)),
+			zap.Bool("has_root_cas", s.params.Config.ClusterTLSConfig.RootCAs != nil),
+			zap.Bool("insecure_skip_verify", s.params.Config.ClusterTLSConfig.InsecureSkipVerify),
+		)
+		if s.params.Config.ClusterTLSInfo != nil {
+			log.Info("TLS Info before PD request",
+				zap.String("cert_file", s.params.Config.ClusterTLSInfo.CertFile),
+				zap.String("key_file", s.params.Config.ClusterTLSInfo.KeyFile),
+				zap.String("ca_file", s.params.Config.ClusterTLSInfo.TrustedCAFile),
+			)
+		}
+	} else {
+		log.Info("No TLS configuration found before PD request")
+	}
+
 	data, err := s.params.PDClient.SendGetRequest("/config")
 	log.Warn("[metrics] Raw PD /config response", zap.ByteString("raw_json", data))
 	if err != nil {
-		log.Warn("[metrics] Get PD /config failed")
+		log.Warn("[metrics] Get PD /config failed",
+			zap.Error(err),
+			zap.String("pd_endpoint", s.params.Config.PDEndPoint),
+			zap.String("request_url", url),
+		)
 		return "", err
 	}
 	var config pdConfig

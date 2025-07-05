@@ -11,7 +11,9 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/pingcap/log"
 	"go.uber.org/fx"
+	"go.uber.org/zap"
 
 	"github.com/pingcap/tidb-dashboard/pkg/config"
 	"github.com/pingcap/tidb-dashboard/pkg/httpc"
@@ -90,8 +92,35 @@ func (c *Client) Get(relativeURI string) (*httpc.Response, error) {
 }
 
 func (c *Client) SendGetRequest(relativeURI string) ([]byte, error) {
+	// Monitor certificate changes before PD request
+	if c.httpClient.Config != nil {
+		c.httpClient.Config.MonitorCertificateChanges()
+	}
+
 	res, err := c.Get(relativeURI)
 	if err != nil {
+		// Print certificate information when PD request fails
+		log.Error("PD request failed, printing certificate info for debugging",
+			zap.String("uri", relativeURI),
+			zap.String("base_url", c.baseURL),
+			zap.String("http_scheme", c.httpScheme),
+			zap.Error(err),
+		)
+
+		// Try to get TLS config info from http client
+		if transport, ok := c.httpClient.Transport.(*http.Transport); ok && transport.TLSClientConfig != nil {
+			tlsConfig := transport.TLSClientConfig
+			log.Error("TLS Configuration at failure time",
+				zap.Int("cert_count", len(tlsConfig.Certificates)),
+				zap.Bool("has_root_cas", tlsConfig.RootCAs != nil),
+				zap.Bool("insecure_skip_verify", tlsConfig.InsecureSkipVerify),
+				zap.Uint16("min_version", tlsConfig.MinVersion),
+				zap.Uint16("max_version", tlsConfig.MaxVersion),
+			)
+		} else {
+			log.Error("No TLS configuration found in HTTP client")
+		}
+
 		return nil, err
 	}
 	return res.Body()
