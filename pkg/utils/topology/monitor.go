@@ -40,9 +40,13 @@ func FetchGrafanaTopology(ctx context.Context, etcdClient *clientv3.Client) (*Gr
 func FetchPrometheusTopology(ctx context.Context, etcdClient *clientv3.Client) (*PrometheusInfo, error) {
 	i, err := fetchStandardComponentTopology(ctx, "prometheus", etcdClient)
 	if err != nil {
+		log.Warn("[topology] fetchStandardComponentTopology for prometheus failed", zap.Error(err))
+		log.Info("[topology] fetchStandardComponentTopology for prometheus failed")
 		return nil, err
 	}
 	if i == nil {
+		log.Debug("[topology] No prometheus found in etcd topology")
+		log.Info("[topology] No prometheus found in etcd topology")
 		return nil, nil
 	}
 	return &PrometheusInfo{StandardComponentInfo: *i}, nil

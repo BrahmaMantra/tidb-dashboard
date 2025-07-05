@@ -12,7 +12,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pingcap/log"
 	"github.com/pingcap/tidb-dashboard/pkg/utils/topology"
+	"go.uber.org/zap"
 )
 
 const (
@@ -52,23 +54,29 @@ func normalizeCustomizedPromAddress(addr string) (string, error) {
 // Resolve the customized Prometheus address in PD config. If it is not configured, empty address will be returned.
 // The returned address must be valid. If an invalid Prometheus address is configured, errors will be returned.
 func (s *Service) resolveCustomizedPromAddress(acceptInvalidAddr bool) (string, error) {
-	// Lookup "metric-storage" cluster config in PD.
+	url := s.params.Config.PDEndPoint + "/pd/api/v1/config"
+	log.Info("url is ", zap.Any("url", url))
 	data, err := s.params.PDClient.SendGetRequest("/config")
+	log.Warn("[metrics] Raw PD /config response", zap.ByteString("raw_json", data))
 	if err != nil {
+		log.Warn("[metrics] Get PD /config failed")
 		return "", err
 	}
 	var config pdConfig
 	if err := json.Unmarshal(data, &config); err != nil {
+		log.Warn("[metrics] Unmarshal PD config failed", zap.Error(err), zap.ByteString("raw_json", data))
 		return "", err
 	}
+	log.Warn("[metrics] Parsed PD config struct (full)", zap.Reflect("config", config))
 	addr := config.PdServer.MetricStorage
+	log.Warn("[metrics] Got PD metric-storage", zap.String("addr", addr))
 	if len(addr) > 0 {
 		if acceptInvalidAddr {
 			return addr, nil
 		}
-		// Verify whether address is valid. If not valid, throw error.
 		addr, err = normalizeCustomizedPromAddress(addr)
 		if err != nil {
+			log.Warn("[metrics] Invalid custom prometheus address", zap.String("addr", addr), zap.Error(err))
 			return "", err
 		}
 		return addr, nil
@@ -79,34 +87,45 @@ func (s *Service) resolveCustomizedPromAddress(acceptInvalidAddr bool) (string, 
 // Resolve the Prometheus address recorded by deployment tools in the `/topology` etcd namespace.
 // If the address is not recorded (for example, when Prometheus is not deployed), empty address will be returned.
 func (s *Service) resolveDeployedPromAddress() (string, error) {
+	log.Warn("[metrics] resolveDeployedPromAddress called")
 	pi, err := topology.FetchPrometheusTopology(s.lifecycleCtx, s.params.EtcdClient)
 	if err != nil {
+		log.Warn("[metrics] FetchPrometheusTopology failed", zap.Error(err))
 		return "", err
 	}
 	if pi == nil {
+		log.Warn("[metrics] No deployed prometheus found in topology")
 		return "", nil
 	}
-	return fmt.Sprintf("%s://%s", s.params.Config.GetClusterHTTPScheme(), net.JoinHostPort(pi.IP, strconv.Itoa(int(pi.Port)))), nil
+	addr := fmt.Sprintf("%s://%s", s.params.Config.GetClusterHTTPScheme(), net.JoinHostPort(pi.IP, strconv.Itoa(int(pi.Port))))
+	log.Warn("[metrics] Got deployed prometheus address", zap.String("addr", addr))
+	return addr, nil
 }
 
 // Resolve the final Prometheus address. When user has customized an address, this address is returned. Otherwise,
 // address recorded by deployment tools will be returned.
 // If neither custom address nor deployed address is available, empty address will be returned.
 func (s *Service) resolveFinalPromAddress() (string, error) {
+	log.Warn("[metrics] resolveFinalPromAddress called")
 	addr, err := s.resolveCustomizedPromAddress(false)
 	if err != nil {
+		log.Warn("[metrics] resolveCustomizedPromAddress failed", zap.Error(err))
 		return "", err
 	}
 	if addr != "" {
+		log.Warn("[metrics] Using custom prometheus address", zap.String("addr", addr))
 		return addr, nil
 	}
 	addr, err = s.resolveDeployedPromAddress()
 	if err != nil {
+		log.Warn("[metrics] resolveDeployedPromAddress failed", zap.Error(err))
 		return "", err
 	}
 	if addr != "" {
+		log.Warn("[metrics] Using deployed prometheus address", zap.String("addr", addr))
 		return addr, nil
 	}
+	log.Warn("[metrics] No prometheus address found")
 	return "", nil
 }
 
