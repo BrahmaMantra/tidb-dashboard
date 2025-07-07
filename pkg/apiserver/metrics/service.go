@@ -4,6 +4,7 @@ package metrics
 
 import (
 	"context"
+	"net/http"
 	"time"
 
 	"github.com/joomcode/errorx"
@@ -46,6 +47,11 @@ type Service struct {
 
 func NewService(lc fx.Lifecycle, p ServiceParams) *Service {
 	s := &Service{params: p}
+
+	// force to attempt HTTP2 with connect to prometheus
+	if transport, ok := s.params.HTTPClient.Transport.(*http.Transport); ok {
+		transport.ForceAttemptHTTP2 = true
+	}
 
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
