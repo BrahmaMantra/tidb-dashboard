@@ -11,8 +11,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/pingcap/log"
 	"github.com/pingcap/tidb-dashboard/pkg/apiserver/user"
 	"github.com/pingcap/tidb-dashboard/util/rest"
+	"go.uber.org/zap"
 )
 
 type QueryRequest struct {
@@ -73,6 +75,13 @@ func (s *Service) queryMetrics(c *gin.Context) {
 	}
 
 	promResp, err := s.httpClient.Do(promReq)
+	if promResp != nil {
+		log.Info("Prometheus response protocol",
+			zap.String("proto", promResp.Proto),
+			zap.Int("proto_major", promResp.ProtoMajor),
+			zap.Int("proto_minor", promResp.ProtoMinor),
+		)
+	}
 	if err != nil {
 		rest.Error(c, ErrPrometheusQueryFailed.Wrap(err, "failed to send requests to Prometheus"))
 		return
