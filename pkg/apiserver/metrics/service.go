@@ -56,7 +56,8 @@ func NewService(lc fx.Lifecycle, p ServiceParams) *Service {
 					conn, err := tls.Dial(network, addr, tlsConfig)
 					return conn, err
 				},
-				TLSClientConfig: tlsConfig,
+				TLSClientConfig:   tlsConfig,
+				ForceAttemptHTTP2: true,
 			},
 			Timeout: defaultPromQueryTimeout,
 		},
